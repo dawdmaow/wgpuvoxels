@@ -1,5 +1,5 @@
 // 2.5D volumetric-style clouds: stacked XZ slices (instanced quads) with fBm noise.
-// Intentionally does NOT apply terrain distance fog — only a fixed sky-color tint so
+// Intentionally does NOT apply terrain distance fog - only a fixed sky-color tint so
 // clouds stay readable at the same apparent density regardless of world fog.
 
 struct SharedFrame {
@@ -29,7 +29,7 @@ struct Vertex_Output {
 }
 
 fn layer_y_from_instance(iid: u32) -> f32 {
-    // Matches CPU-packed vec4 (see sort_cloud_layers in main.odin). Only .xyzw used; 4 instances.
+    // Matches CPU-packed vec4 (sort_cloud_layers in main.odin): fixed ascending world Y per instance.
     switch iid {
         case 0u: {
             return cloud.cloud_sorted_y_lo.x;
@@ -125,7 +125,7 @@ fn noise2(p: vec2<f32>) -> f32 {
     return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
-// Two octaves only — main cost was three fBm chains per pixel; one cheap fBm for bulk density.
+// Two octaves only - main cost was three fBm chains per pixel; one cheap fBm for bulk density.
 fn fbm2(p: vec2<f32>) -> f32 {
     var v: f32 = 0.0;
     var a: f32 = 0.5;
@@ -143,7 +143,7 @@ fn fs_main(
     @location(0) @interpolate(flat) world_y: f32,
     @location(1) world_xz: vec2<f32>,
 ) -> @location(0) vec4<f32> {
-    // Cheap masks first: looking up fills the screen with cloud quads — skip fBm off the card
+    // Cheap masks first: looking up fills the screen with cloud quads - skip fBm off the card
     // and outside the vertical envelope (big win at corners / under the stack).
     let cam_xz = vec2<f32>(frame.camera_pos.x, frame.camera_pos.z);
     let r = length(world_xz - cam_xz);
@@ -161,10 +161,10 @@ fn fs_main(
     }
 
     let scroll = WIND * frame.elapsed_time;
-    // Without a Y term, every slice used the same (xz) noise — stacked identical billboards.
+    // Without a Y term, every slice used the same (xz) noise - stacked identical billboards.
     let y_shear = vec2<f32>(world_y * 0.009, world_y * -0.006);
     let p = world_xz * 0.0062 + scroll + y_shear;
-    // Single noise warp + 2-oct fBm + single noise wispy — same look family, ~3× less ALU than triple fBm.
+    // Single noise warp + 2-oct fBm + single noise wispy - same look family, ~3× less ALU than triple fBm.
     let warp = noise2(p * 0.35 + vec2<f32>(3.1, 1.7)) * 7.2;
     let d = fbm2(p + vec2<f32>(warp, warp * 0.7));
     // Wider smoothstep band + slightly lower floor = visibly more cloud mass vs sky.

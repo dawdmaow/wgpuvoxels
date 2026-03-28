@@ -19,25 +19,25 @@ const KIND_ORE_GREEN: u32 = 27u;
 const KIND_ORE_RED: u32 = 28u;
 const KIND_ORE_BLUE: u32 = 29u;
 const KIND_ORE_COAL: u32 = 30u;
-// Slow FBM drives vertical range and ±shift so large regions read as different “biomes”.
+// Slow FBM drives vertical range and +/- shift so large regions read as different biomes.
 const BIOME_MACRO_SCALE: f32 = 0.0041;
 // Lower boost/shift so non-plains terrain is still hilly, not endless sharp peaks (chunk is only 48 tall).
 const HEIGHT_BOOST_MIN: f32 = 1.04;
 const HEIGHT_BOOST_MAX: f32 = 1.42;
 const BIOME_VERTICAL_SHIFT: i32 = 2;
-// Separate slow FBM from biome_macro so “plains” patches are large and don’t track hills/mountains.
+// Separate slow FBM from biome_macro so plains patches stay large and do not track hills/mountains.
 const PLAINS_MACRO_SCALE: f32 = 0.0018;
-// FBM spends most of its mass ~0.35–0.65; a tight smoothstep here left plains≈0 almost everywhere.
+// FBM spends most of its mass around 0.35-0.65; a tight smoothstep here left plains near 0 almost everywhere.
 const PLAINS_SMOOTH_LO: f32 = 0.30;
 const PLAINS_SMOOTH_HI: f32 = 0.62;
 const FLAT_BASE_ABOVE_SEA: i32 = 6;
 const FLAT_ROLL_SCALE: f32 = 0.09;
 const FLAT_ROLL_AMP: f32 = 2.5;
-// River: narrow bands where `fbm` crosses 0.5 — carve down and cap to sea level so water fills.
+// River: narrow bands where `fbm` crosses 0.5 - carve down and cap to sea level so water fills.
 const RIVER_NOISE_SCALE: f32 = 0.0027;
 const RIVER_BANK_HALF: f32 = 0.026;
 const RIVER_MAX_CARVE: i32 = 7;
-// Steeper base terrain (before ravines/rivers) → thinner dirt; integer slope = max step to a neighbor.
+// Steeper base terrain (before ravines/rivers) means thinner dirt; integer slope = max step to a neighbor.
 const SLOPE_DIRT_SHALLOW: i32 = 2;
 const SLOPE_DIRT_STEEP: i32 = 4;
 const SEA_LEVEL: i32 = 12;
@@ -98,7 +98,7 @@ const ORE_COAL_MAX_Y: i32 = 26;
 const ORE_COAL_SCALE: f32 = 0.147;
 const ORE_COAL_THRESHOLD: f32 = 0.63 * ORE_THRESHOLD_MULTIPLIER;
 
-// Per-type XZ rotation + world shift + slight Y scale so vein fields don’t line up in the same places.
+// Per-type XZ rotation + world shift + slight Y scale so vein fields do not line up in the same places.
 const ORE_D_YAW: f32 = 0.91;
 const ORE_D_Y_SCALE: f32 = 1.08;
 const ORE_D_SHIFT: vec3<f32> = vec3<f32>(1021.0, 307.0, 419.0);
@@ -193,7 +193,7 @@ fn plains_blend(wx: i32, wz: i32, seed: f32) -> f32 {
 fn ravine_depth(wx: i32, wz: i32, seed: f32) -> i32 {
     let fx = f32(wx);
     let fz = f32(wz);
-    // Stretched axes → long straight-ish gorges; two orientations + diagonal so they cross naturally.
+    // Stretched axes create long straight-ish gorges; two orientations + diagonal so they cross naturally.
     let p0 = vec2<f32>(fx * 0.027, fz * 0.0033) + vec2<f32>(seed * 19.0, seed * -13.0);
     let p1 = vec2<f32>(fx * 0.0033, fz * 0.027) + vec2<f32>(seed * -7.0, seed * 23.0);
     let px = fx * 0.70710678 + fz * 0.70710678;
@@ -202,7 +202,7 @@ fn ravine_depth(wx: i32, wz: i32, seed: f32) -> i32 {
     let v0 = fbm(p0);
     let v1 = fbm(p1);
     let v2 = fbm(p2);
-    // Deep only in the bottom of each stretched FBM — typical values sit ~0.45–0.55, so this stays sparse.
+    // Deep only in the bottom of each stretched FBM; typical values sit around 0.45-0.55, so this stays sparse.
     let t0 = 1.0 - smoothstep(RAVINE_LOW, RAVINE_HIGH, v0);
     let t1 = 1.0 - smoothstep(RAVINE_LOW, RAVINE_HIGH, v1);
     let t2 = 1.0 - smoothstep(RAVINE_LOW, RAVINE_HIGH, v2);
@@ -225,7 +225,7 @@ fn tunnel_cave_value(wx: i32, wy: i32, wz: i32, seed: f32) -> f32 {
     let sx = seed * 19.3;
     let sy = seed * -11.7;
     let sz = seed * 7.1;
-    // Along +X and +Z at different seeds so grids don’t coincide; diagonals for variety.
+    // Along +X and +Z at different seeds so grids do not coincide; diagonals add variety.
     let p_x = vec3<f32>(
         fx * TUNNEL_ALONG_SCALE + sx,
         fy * TUNNEL_Y_SCALE + sy,
@@ -258,7 +258,7 @@ fn tunnel_cave_value(wx: i32, wy: i32, wz: i32, seed: f32) -> f32 {
 }
 
 fn ore_field(p: vec3<f32>, scale: f32, seed_offset: vec3<f32>) -> f32 {
-    // World-space multi-octave field; heavier high-frequency weight → smaller blobs above threshold.
+    // World-space multi-octave field; heavier high-frequency weight yields smaller blobs above threshold.
     let base = p * scale + seed_offset;
     let n0 = noise3(base);
     let n1 = noise3(base * 2.11 + vec3<f32>(17.3, 9.7, 23.5));
@@ -433,7 +433,7 @@ fn terrain_main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let wp = vec3<f32>(f32(wx), f32(ly), f32(wz));
         let seed_jitter = vec3<f32>(batch.seed * 13.0, batch.seed * -9.0, batch.seed * 5.0);
 
-        // Rarer ores first (diamond → gold → iron → colored → coal). Colored: one vein test, hash picks R/G/B.
+        // Rarer ores first (diamond -> gold -> iron -> colored -> coal). Colored: one vein test, hash picks R/G/B.
         if (ly >= ORE_DIAMOND_MIN_Y && ly <= ORE_DIAMOND_MAX_Y) {
             let p_d = ore_vein_sample(wp, ORE_D_YAW, ORE_D_Y_SCALE, ORE_D_SHIFT + seed_jitter);
             let f = ore_field(

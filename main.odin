@@ -82,7 +82,7 @@ Scene_Uniform :: struct #align (16) {
 Cloud_Uniform :: struct #align (16) {
 	// .x = min world Y, .y = max world Y across active cloud slices (vertical fade in cloud.wgsl).
 	cloud_y_bounds:    [2]f32,
-	// Back-to-front draw order for 2.5D cloud slices (see sort_cloud_layers).
+	// Layer world Y packed low to high (instances 0..N-1); fixed order keeps alpha stacking stable with pitch.
 	cloud_sorted_y_lo: [4]f32,
 	cloud_sorted_y_hi: [4]f32,
 }
@@ -126,7 +126,7 @@ Bloom_Uniform :: struct #align (16) {
 
 BLOOM_UNIFORM_SIZE :: size_of(Bloom_Uniform)
 
-// Tuned for LDR scene (lit terrain rarely exceeds ~0.5–0.8); high thresholds yield invisible bloom.
+// Tuned for LDR scene (lit terrain rarely exceeds ~0.5-0.8); high thresholds yield invisible bloom.
 BLOOM_THRESHOLD :: 0.12
 BLOOM_KNEE :: 0.75
 BLOOM_STRENGTH :: 0.3
@@ -146,10 +146,9 @@ CAMERA_FOV_DEG :: 70.0
 CAMERA_NEAR_PLANE :: 0.01
 CAMERA_FAR_PLANE :: 500.0
 
-// Horizontal slices follow the camera in XZ; Y order is sorted along the view ray for correct alpha.
-// Keep cloud layer heights in world space so jumps/elevation changes don't drag the sky stack.
-sort_cloud_layers :: proc(globals: ^Cloud_Uniform, player_pos: [3]f32, forward: [3]f32) {
-	cloud_layer_y_offsets := [CLOUD_LAYER_COUNT]f32{14.3, 21.6, 28.5, 36.1, 44.2}
+// Horizontal slices follow the camera in XZ. Layer Y is fixed ascending world space (see offsets).
+sort_cloud_layers :: proc(globals: ^Cloud_Uniform) {
+	cloud_layer_y_offsets := [CLOUD_LAYER_COUNT]f32{14.3, 21.6, 28.5, 36.1, 44.2} - 10
 	cloud_base_y := f32(SEA_LEVEL)
 	ys: [CLOUD_LAYER_COUNT]f32
 	for i in 0 ..< CLOUD_LAYER_COUNT {
@@ -163,27 +162,8 @@ sort_cloud_layers :: proc(globals: ^Cloud_Uniform, player_pos: [3]f32, forward: 
 	}
 	globals.cloud_y_bounds[0] = min_y
 	globals.cloud_y_bounds[1] = max_y
-	ts: [CLOUD_LAYER_COUNT]f32
 	for i in 0 ..< CLOUD_LAYER_COUNT {
-		if abs(forward.y) > 1e-4 {
-			ts[i] = (ys[i] - player_pos.y) / forward.y
-		} else {
-			ts[i] = f32(1000 - i)
-		}
-	}
-	idx: [CLOUD_LAYER_COUNT]int
-	for i in 0 ..< CLOUD_LAYER_COUNT {
-		idx[i] = i
-	}
-	for i in 0 ..< CLOUD_LAYER_COUNT {
-		for j in 0 ..< CLOUD_LAYER_COUNT - 1 - i {
-			if ts[idx[j]] < ts[idx[j + 1]] {
-				idx[j], idx[j + 1] = idx[j + 1], idx[j]
-			}
-		}
-	}
-	for i in 0 ..< CLOUD_LAYER_COUNT {
-		y := ys[idx[i]]
+		y := ys[i]
 		if i < 4 {
 			globals.cloud_sorted_y_lo[i] = y
 		} else {
@@ -215,7 +195,7 @@ sort_transparent_chunk_draws_back_to_front :: proc(draws: ^[dynamic]Transparent_
 	}
 }
 GHOST_PREVIEW_MATERIAL_MARKER :: -1
-// Full opaque cube: 6 faces × 4 verts × 11 f32 (voxel_preview_append_face).
+// Full opaque cube: 6 faces * 4 verts * 11 f32 (voxel_preview_append_face).
 GHOST_PREVIEW_VERTEX_BUFFER_MAX_BYTES :: u64(6 * 4 * 11 * size_of(f32))
 // Two triangles per face, 6 indices each.
 GHOST_PREVIEW_INDEX_BUFFER_MAX_BYTES :: u64(6 * 6 * size_of(u32))
@@ -3813,7 +3793,7 @@ frame :: proc "c" (dt: f32) {
 		uint(size_of(scene_uniform)),
 	)
 	cloud_uniform := Cloud_Uniform{}
-	sort_cloud_layers(&cloud_uniform, state.player_pos, forward)
+	sort_cloud_layers(&cloud_uniform)
 	wgpu.QueueWriteBuffer(
 		state.queue,
 		state.cloud_uniform_buffer,
@@ -5204,7 +5184,7 @@ chunk_append_flower_billboard :: proc(
 	)
 }
 
-// Open water top is +Y; back-face culling hides it from underwater — duplicate with -Y and flipped winding.
+// Open water top is +Y; back-face culling hides it from underwater - duplicate with -Y and flipped winding.
 chunk_append_water_top_underface :: proc(
 	mesh: ^Chunk_Mesh,
 	is_transparent: bool,
@@ -6290,7 +6270,7 @@ player_eye_in_water :: proc() -> bool {
 	return ok && kind == .Water
 }
 
-// Open air from the eye to the world ceiling — rain/sky effects only make sense when nothing solid caps this column.
+// Open air from the eye to the world ceiling - rain/sky effects only make sense when nothing solid caps this column.
 player_has_open_sky_above :: proc() -> bool {
 	col_x := int(math.floor(state.player_pos.x))
 	col_z := int(math.floor(state.player_pos.z))
@@ -6304,7 +6284,7 @@ player_has_open_sky_above :: proc() -> bool {
 
 // Buoyancy only near an open surface: same (x,z) column must reach air (not solid) above the water we're in,
 // and the body must be within BUOYANCY_MAX_DEPTH_M of that surface (downward in water).
-// factor ramps 0→1 from the bottom of that band to the surface so a tap of swim near the lake floor
+// factor ramps 0 to 1 from the bottom of that band to the surface so a tap of swim near the lake floor
 // doesn't instantly hit full WATER_BUOYANCY + terminal upward speed for the whole column.
 player_water_buoyancy_sample :: proc() -> (near_open_surface: bool, factor: f32) {
 	BUOYANCY_MAX_DEPTH_M :: 1.35
@@ -6330,7 +6310,7 @@ player_water_buoyancy_sample :: proc() -> (near_open_surface: bool, factor: f32)
 			continue
 		}
 		if kind != .None {
-			// Roof or wall before any air — no free surface above this water pocket.
+			// Roof or wall before any air - no free surface above this water pocket.
 			return false, 0
 		}
 		surface_y := f32(wy)
@@ -6344,7 +6324,7 @@ player_water_buoyancy_sample :: proc() -> (near_open_surface: bool, factor: f32)
 	return false, 0
 }
 
-// True when the body AABB sits against solid in ±X/±Z (ledge / pool wall), for climb-out jumps at the surface.
+// True when the body AABB sits against solid in +/-X or +/-Z (ledge / pool wall), for climb-out jumps at the surface.
 player_hugging_wall :: proc() -> bool {
 	c := state.player_pos
 	c.y -= PLAYER_EYE_OFFSET_FROM_CENTER_Y

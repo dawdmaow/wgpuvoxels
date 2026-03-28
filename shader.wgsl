@@ -231,7 +231,7 @@ fn fs_main(
                     reflection_uv.x >= 0.0 && reflection_uv.x <= 1.0 &&
                     reflection_uv.y >= 0.0 && reflection_uv.y <= 1.0;
                 if (in_bounds) {
-                    // Unlit scene color from reflection RT — not multiplied by lambert/ao/albedo.
+                    // Unlit scene color from reflection RT - not multiplied by lambert/ao/albedo.
                     // Reflection sample sits in per-pixel conditional flow; explicit LOD avoids
                     // derivative/uniform-flow constraints from implicit sampling.
                     let planar_raw = textureSampleLevel(reflection_tex, reflection_sampler, reflection_uv, 0.0).rgb;
